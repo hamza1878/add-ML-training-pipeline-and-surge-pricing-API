@@ -1,0 +1,203 @@
+"""
+╔══════════════════════════════════════════════════════════════════╗
+║   MOVIROO — config.py                                            ║
+║   Constantes tarifaires, multiplicateurs et tables d'encodage    ║
+║   Importé par tous les modules du projet.                        ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
+
+from __future__ import annotations
+
+# ══════════════════════════════════════════════════════════════════
+# TARIF DE BASE
+# ══════════════════════════════════════════════════════════════════
+
+BASE_FARE     = 2.50   # TND — prise en charge fixe
+RATE_PER_KM   = 0.55   # TND / km
+RATE_PER_MIN  = 0.20   # TND / min
+MIN_FARE      = 4.00   # TND — course minimale garantie
+
+# ══════════════════════════════════════════════════════════════════
+# POIDS ENSEMBLE ML
+# ══════════════════════════════════════════════════════════════════
+
+W_XGB  = 0.55   # poids XGBoost
+W_LGBM = 0.45   # poids LightGBM
+
+# ══════════════════════════════════════════════════════════════════
+# MULTIPLICATEURS DE SURGE
+# ══════════════════════════════════════════════════════════════════
+
+# Trafic : 1=faible | 2=modéré | 3=élevé
+MULT_TRAFFIC: dict[int, float] = {
+    1: 1.00,
+    2: 1.20,
+    3: 1.50,
+}
+
+# Météo : 1=clair | 2=pluie | 3=tempête | 4=sirocco
+MULT_WEATHER: dict[int, float] = {
+    1: 1.00,
+    2: 1.10,
+    3: 1.30,
+    4: 1.10,
+}
+
+# Demande app
+MULT_DEMAND: dict[str, float] = {
+    "normal": 1.00,
+    "rush":   1.25,
+    "surge":  1.60,
+}
+
+# Nuit (avant 06h ou après 20h)
+MULT_NIGHT: float = 1.20
+
+# Type de véhicule
+MULT_CAR: dict[str, float] = {
+    "economy": 0.75,
+    "comfort": 1.00,
+    "van":     1.30,
+    "premium": 1.60,
+}
+
+# Vendredi Jumu'ah — prière 11h–13h
+MULT_FRIDAY_JUMUAH: float = 1.40
+
+# Ramadan — créneaux spécifiques
+MULT_RAMADAN: dict[str, float] = {
+    "ramadan_iftar":   2.10,   # 17h45–18h15 (pic absolu)
+    "ramadan_tarawih": 1.30,   # ~22h
+    "ramadan_suhoor":  1.15,   # ~02h30
+    "none":            1.00,
+}
+
+# Beach surge — par créneau
+MULT_BEACH: dict[str, float] = {
+    "afflux_matin":   1.25,   # 09h–11h
+    "après_midi":     1.30,   # 14h–16h
+    "coucher_soleil": 1.35,   # 19h–20h
+    "none":           1.00,
+}
+
+# Zone géographique
+MULT_ZONE: dict[str, float] = {
+    "capitale":   1.15,
+    "banlieue":   1.05,
+    "balnéaire":  1.10,
+    "intérieure": 1.00,
+    "sud":        0.95,
+}
+
+# ══════════════════════════════════════════════════════════════════
+# LABELS MÉTÉO
+# ══════════════════════════════════════════════════════════════════
+
+WEATHER_LABELS: dict[int, str] = {
+    1: "clair",
+    2: "pluie",
+    3: "tempête",
+    4: "sirocco",
+}
+
+# ══════════════════════════════════════════════════════════════════
+# ENCODAGES CATÉGORIELS  (Feature engineering ML)
+# ══════════════════════════════════════════════════════════════════
+
+ZONE_MAP: dict[str, int] = {
+    "capitale":   0,
+    "banlieue":   1,
+    "balnéaire":  2,
+    "intérieure": 3,
+    "sud":        4,
+}
+
+DEMAND_MAP: dict[str, int] = {
+    "normal": 0,
+    "rush":   1,
+    "surge":  2,
+}
+
+CAR_MAP: dict[str, int] = {
+    "economy": 1,
+    "comfort": 2,
+    "van":     3,
+    "premium": 4,
+    "moto":    5,
+}
+
+PERIODE_MAP: dict[str, int] = {
+    "nuit_calme":           0,
+    "circulation_normale":  1,
+    "matin_normal":         1,
+    "normal":               1,
+    "rush_matin_peak":      2,
+    "pause_dejeuner":       3,
+    "rush_soir":            4,
+    "sortie_mosquee_jumua": 5,
+    "ramadan_iftar":        6,
+    "ramadan_tarawih":      7,
+    "ramadan_suhoor":       8,
+}
+
+BEACH_REASON_MAP: dict[str, int] = {
+    "":               0,
+    "none":           0,
+    "afflux_matin":   1,
+    "après_midi":     2,
+    "coucher_soleil": 3,
+}
+
+# ══════════════════════════════════════════════════════════════════
+# CALENDRIER RAMADAN (Tunisie, ±1 jour selon croissant)
+# ══════════════════════════════════════════════════════════════════
+
+RAMADAN_TABLE: dict[int, tuple[str, str]] = {
+    2023: ("2023-03-22", "2023-04-20"),
+    2024: ("2024-03-11", "2024-04-09"),
+    2025: ("2025-03-01", "2025-03-29"),
+    2026: ("2026-02-18", "2026-03-19"),
+    2027: ("2027-02-08", "2027-03-09"),
+    2028: ("2028-01-28", "2028-02-25"),
+    2029: ("2029-01-16", "2029-02-13"),
+    2030: ("2030-01-06", "2030-02-03"),
+}
+
+# ══════════════════════════════════════════════════════════════════
+# PARAMÈTRES ML
+# ══════════════════════════════════════════════════════════════════
+
+XGB_PARAMS: dict = {
+    "objective":        "reg:squarederror",
+    "n_estimators":     800,
+    "max_depth":        7,
+    "learning_rate":    0.04,
+    "subsample":        0.80,
+    "colsample_bytree": 0.80,
+    "min_child_weight": 3,
+    "reg_alpha":        0.1,
+    "reg_lambda":       1.0,
+    "random_state":     42,
+    "n_jobs":           -1,
+    "verbosity":        0,
+}
+
+LGBM_PARAMS: dict = {
+    "objective":         "regression",
+    "n_estimators":      800,
+    "max_depth":         7,
+    "learning_rate":     0.04,
+    "num_leaves":        63,
+    "subsample":         0.80,
+    "colsample_bytree":  0.80,
+    "min_child_samples": 10,
+    "reg_alpha":         0.1,
+    "reg_lambda":        1.0,
+    "random_state":      42,
+    "n_jobs":            -1,
+    "verbose":          -1,
+}
+
+# Colonne cible dans le CSV
+TARGET_COL   = "surge_multiplier"
+RANDOM_STATE = 42
