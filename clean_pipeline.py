@@ -1,24 +1,4 @@
-"""
-╔══════════════════════════════════════════════════════════════════╗
-║   MOVIROO — clean_pipeline.py                                    ║
-║   Pipeline : nettoyage CSV → enrichissement météo → cleaned_data ║
-║                                                                  ║
-║   Usage :                                                        ║
-║     python clean_pipeline.py                                     ║
-║     python clean_pipeline.py --input raw.csv --output clean.csv  ║
-║                                                                  ║
-║   Colonnes attendues dans le CSV d'entrée (exemple dataset) :    ║
-║     ville, gouvernorat, zone_type, latitude, longitude,          ║
-║     population, intensite_ville, has_beach, beach_name,          ║
-║     heure, heure_int, minute, periode, cause_circulation,        ║
-║     trafic_niveau, trafic_label, demande, is_night,              ║
-║     is_ramadan_slot, is_friday_slot, is_school_slot,             ║
-║     is_prayer_slot, is_beach_hour, beach_peak_reason,            ║
-║     beach_surge_applied, beach_surge_value, surge_multiplier,    ║
-║     indice_congestion, retard_estime_min, vitesse_moy_kmh,       ║
-║     chauffeurs_actifs                                            ║
-╚══════════════════════════════════════════════════════════════════╝
-"""
+
 
 from __future__ import annotations
 
@@ -40,22 +20,12 @@ warnings.filterwarnings("ignore")
 DEFAULT_INPUT  = "tunisia_all_cities_traffic.csv"
 DEFAULT_OUTPUT = "cleaned_data.csv"
 DATETIME_COL   = "reservation_datetime"
-
-
 # ══════════════════════════════════════════════════════════════════
 # ÉTAPE 1 — NETTOYAGE
 # ══════════════════════════════════════════════════════════════════
 
 def _clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Impute les valeurs manquantes sans supprimer aucune ligne.
-
-    Stratégie :
-      • Colonnes numériques → médiane
-      • Flags booléens      → 0
-      • beach_surge_value   → 1.0
-      • Colonnes texte      → chaîne vide
-    """
+ 
     print(f"  Shape initial : {df.shape[0]:,} lignes × {df.shape[1]} colonnes")
     total_nulls_before = df.isnull().sum().sum()
 

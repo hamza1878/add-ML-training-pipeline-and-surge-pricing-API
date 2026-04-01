@@ -1,11 +1,3 @@
-"""
-╔══════════════════════════════════════════════════════════════════╗
-║   MOVIROO — config.py                                            ║
-║   Constantes tarifaires, multiplicateurs et tables d'encodage    ║
-║   Importé par tous les modules du projet.                        ║
-╚══════════════════════════════════════════════════════════════════╝
-"""
-
 from __future__ import annotations
 
 # ══════════════════════════════════════════════════════════════════
@@ -38,7 +30,7 @@ MULT_TRAFFIC: dict[int, float] = {
 # Météo : 1=clair | 2=pluie | 3=tempête | 4=sirocco
 MULT_WEATHER: dict[int, float] = {
     1: 1.00,
-    2: 1.10,
+    2: 2.10,
     3: 1.30,
     4: 1.10,
 }
@@ -53,12 +45,15 @@ MULT_DEMAND: dict[str, float] = {
 # Nuit (avant 06h ou après 20h)
 MULT_NIGHT: float = 1.20
 
-# Type de véhicule
+# ── Types de véhicules étendus ────────────────────────────────────
+# Economy | Standard | Comfort | First Class | Van | Mini Bus
 MULT_CAR: dict[str, float] = {
-    "economy": 0.75,
-    "comfort": 1.00,
-    "van":     1.30,
-    "premium": 1.60,
+    "economy":     0.75,
+    "standard":    0.90,
+    "comfort":     1.00,
+    "first_class": 1.60,
+    "van":         1.30,
+    "mini_bus":    1.50,
 }
 
 # Vendredi Jumu'ah — prière 11h–13h
@@ -66,10 +61,12 @@ MULT_FRIDAY_JUMUAH: float = 1.40
 
 # Ramadan — créneaux spécifiques
 MULT_RAMADAN: dict[str, float] = {
-    "ramadan_iftar":   2.10,   # 17h45–18h15 (pic absolu)
-    "ramadan_tarawih": 1.30,   # ~22h
-    "ramadan_suhoor":  1.15,   # ~02h30
-    "none":            1.00,
+    "ramadan_iftar":         2.10,   # 17h45–18h15 (pic absolu)
+    "ramadan_tarawih":       1.30,   # ~22h
+    "ramadan_suhoor":        1.15,   # ~02h30
+    # ── NOUVEAU : dernière semaine de Ramadan (fin approche) ──────
+    "ramadan_last_week":     1.60,   # 7 derniers jours avant Aïd
+    "none":                  1.00,
 }
 
 # Beach surge — par créneau
@@ -87,6 +84,71 @@ MULT_ZONE: dict[str, float] = {
     "balnéaire":  1.10,
     "intérieure": 1.00,
     "sud":        0.95,
+}
+
+# ── NOUVEAU : Événements calendaires spéciaux ─────────────────────
+# Appliqués en addition sur le prix final (multiplié par-dessus surge)
+
+MULT_SPECIAL_EVENT: dict[str, float] = {
+    # Aïd el-Fitr — 3 premiers jours
+    "aid_el_fitr":           2.00,
+    # Aïd el-Adha — semaine entière (grande mobilité familiale)
+    "aid_el_adha_week":      1.80,
+    # Nuit du 31 décembre / 1er janvier
+    "new_year_eve":          1.90,
+    # 2 et 3 janvier (premiers jours de la nouvelle année)
+    "new_year_days":         1.40,
+    # Aucun événement spécial
+    "none":                  1.00,
+}
+
+# ── NOUVEAU : Météo estimée par saison (si date hors plage API) ───
+# Températures moyennes Tunisie, vent moyen, précipitations moyennes
+ESTIMATED_WEATHER_BY_SEASON: dict[str, dict] = {
+    "été": {
+        "temperature_2m":  32.0,
+        "windspeed_10m":   12.0,
+        "precipitation":    0.0,
+        "rain":             0.0,
+        "weather_code":     1,      # clair
+        "weather_label":   "clair",
+        "weather_mult":    1.00,
+        "weathercode_raw":  0,
+        "visibility":   10_000.0,
+    },
+    "printemps": {
+        "temperature_2m":  20.0,
+        "windspeed_10m":   14.0,
+        "precipitation":    5.0,
+        "rain":             5.0,
+        "weather_code":     2,      # légère pluie possible
+        "weather_label":   "pluie",
+        "weather_mult":    1.10,
+        "weathercode_raw":  61,
+        "visibility":    8_000.0,
+    },
+    "automne": {
+        "temperature_2m":  18.0,
+        "windspeed_10m":   15.0,
+        "precipitation":    8.0,
+        "rain":             8.0,
+        "weather_code":     2,
+        "weather_label":   "pluie",
+        "weather_mult":    1.10,
+        "weathercode_raw":  61,
+        "visibility":    7_000.0,
+    },
+    "hiver": {
+        "temperature_2m":  11.0,
+        "windspeed_10m":   18.0,
+        "precipitation":   15.0,
+        "rain":            15.0,
+        "weather_code":     2,
+        "weather_label":   "pluie",
+        "weather_mult":    1.10,
+        "weathercode_raw":  63,
+        "visibility":    6_000.0,
+    },
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -118,26 +180,34 @@ DEMAND_MAP: dict[str, int] = {
     "surge":  2,
 }
 
+# ── NOUVEAU : encodage véhicules étendus ──────────────────────────
 CAR_MAP: dict[str, int] = {
-    "economy": 1,
-    "comfort": 2,
-    "van":     3,
-    "premium": 4,
-    "moto":    5,
+    "economy":     1,
+    "standard":    2,
+    "comfort":     3,
+    "van":         4,
+    "mini_bus":    5,
+    "first_class": 6,
 }
 
 PERIODE_MAP: dict[str, int] = {
-    "nuit_calme":           0,
-    "circulation_normale":  1,
-    "matin_normal":         1,
-    "normal":               1,
-    "rush_matin_peak":      2,
-    "pause_dejeuner":       3,
-    "rush_soir":            4,
-    "sortie_mosquee_jumua": 5,
-    "ramadan_iftar":        6,
-    "ramadan_tarawih":      7,
-    "ramadan_suhoor":       8,
+    "nuit_calme":             0,
+    "circulation_normale":    1,
+    "matin_normal":           1,
+    "normal":                 1,
+    "rush_matin_peak":        2,
+    "pause_dejeuner":         3,
+    "rush_soir":              4,
+    "sortie_mosquee_jumua":   5,
+    "ramadan_iftar":          6,
+    "ramadan_tarawih":        7,
+    "ramadan_suhoor":         8,
+    # ── NOUVEAU ──────────────────────────────────────────────────
+    "ramadan_last_week":      9,
+    "aid_el_fitr":           10,
+    "aid_el_adha_week":      11,
+    "new_year_eve":          12,
+    "new_year_days":         13,
 }
 
 BEACH_REASON_MAP: dict[str, int] = {
@@ -161,6 +231,18 @@ RAMADAN_TABLE: dict[int, tuple[str, str]] = {
     2028: ("2028-01-28", "2028-02-25"),
     2029: ("2029-01-16", "2029-02-13"),
     2030: ("2030-01-06", "2030-02-03"),
+}
+
+# ── NOUVEAU : Calendrier Aïd el-Adha (Tunisie, approximatif) ─────
+AID_ADHA_TABLE: dict[int, tuple[str, str]] = {
+    2023: ("2023-06-27", "2023-07-04"),
+    2024: ("2024-06-16", "2024-06-23"),
+    2025: ("2025-06-06", "2025-06-13"),
+    2026: ("2026-05-27", "2026-06-03"),
+    2027: ("2027-05-17", "2027-05-24"),
+    2028: ("2028-05-05", "2028-05-12"),
+    2029: ("2029-04-24", "2029-05-01"),
+    2030: ("2030-04-14", "2030-04-21"),
 }
 
 # ══════════════════════════════════════════════════════════════════

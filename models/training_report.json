@@ -7,6 +7,10 @@
     "retard_estime_min",
     "vitesse_moy_kmh",
     "chauffeurs_actifs",
+    "weather_code",
+    "temperature_2m",
+    "windspeed_10m",
+    "precipitation",
     "heure_int",
     "minute",
     "hour_sin",
@@ -17,6 +21,11 @@
     "minute_cos",
     "is_night",
     "is_ramadan_slot",
+    "is_ramadan_last_week",
+    "is_aid_el_fitr",
+    "is_aid_adha_week",
+    "is_new_year_eve",
+    "is_new_year_days",
     "is_friday_slot",
     "is_school_slot",
     "is_prayer_slot",
@@ -29,6 +38,7 @@
     "periode_enc",
     "beach_reason_enc",
     "car_type_code",
+    "special_event_enc",
     "intensite_ville",
     "population_log",
     "traffic_x_demand",
@@ -37,42 +47,47 @@
     "ramadan_x_traffic",
     "beach_x_surge",
     "congestion_x_retard",
+    "special_x_traffic",
+    "aid_fitr_x_hour",
+    "ram_lastweek_x_traffic",
+    "weather_x_traffic",
+    "weather_x_night",
     "vitesse_inv",
     "chauffeurs_inv"
   ],
-  "n_features": 37,
+  "n_features": 52,
   "target": "surge_multiplier",
   "n_train": 3166,
   "n_val": 679,
   "n_test": 679,
   "xgb_val": {
-    "mae": 0.03002490140412096,
-    "rmse": 0.04235434835637204,
-    "r2": 0.9912719771942032,
-    "mape": 2.0361166245882143
+    "mae": 0.030531742076283876,
+    "rmse": 0.0426826930137871,
+    "r2": 0.9911361277206856,
+    "mape": 2.064395113388736
   },
   "xgb_test": {
-    "mae": 0.03026740108287738,
-    "rmse": 0.04248644883838609,
-    "r2": 0.9910496107826384,
-    "mape": 2.0241418204890818
+    "mae": 0.030399229515283552,
+    "rmse": 0.04257990326488445,
+    "r2": 0.9910101924053518,
+    "mape": 2.0424477065036686
   },
   "lgbm_val": {
-    "mae": 0.03243348630713685,
-    "rmse": 0.04538184478030581,
-    "r2": 0.9899796208202588,
-    "mape": 2.1927988648801215
+    "mae": 0.032763005593346536,
+    "rmse": 0.04596617626775282,
+    "r2": 0.9897199170248944,
+    "mape": 2.2129609879501047
   },
   "lgbm_test": {
-    "mae": 0.033094217607151324,
-    "rmse": 0.046212747863624296,
-    "r2": 0.9894107636504864,
-    "mape": 2.2012141718899607
+    "mae": 0.0330689131222911,
+    "rmse": 0.04601648628281042,
+    "r2": 0.989500515819089,
+    "mape": 2.205305816431465
   },
   "ensemble_test": {
-    "mae": 0.03120809621447288,
-    "rmse": 0.043598538824377524,
-    "r2": 0.9905749226137184,
-    "mape": 2.079470714077633
+    "mae": 0.031245203869740255,
+    "rmse": 0.04356871871331774,
+    "r2": 0.9905878111528619,
+    "mape": 2.0922415515191983
   }
 }

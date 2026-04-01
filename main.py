@@ -7,9 +7,6 @@ from models.predictor import predictor
 from pricing.engine   import calculate_trip_price
 
 
-# ══════════════════════════════════════════════════════════════════
-# TRAJETS DE TEST
-# ══════════════════════════════════════════════════════════════════
 
 TRIPS = [
 
@@ -22,8 +19,8 @@ TRIPS = [
         "trafic_niveau": 1, "demande": "normal",
         "indice_congestion": 50, "retard_estime_min": 1,
         "vitesse_moy_kmh": 37, "chauffeurs_actifs": 44,
-        "car_type":   "comfort",
-        "booking_dt": datetime(2025, 3, 30, 0, 0),
+        "car_type":   "economy",
+        "booking_dt": datetime(2026,7, 31,13, 0),
     },
 
     
