@@ -4,9 +4,9 @@ from __future__ import annotations
 # TARIF DE BASE
 # ══════════════════════════════════════════════════════════════════
 
-BASE_FARE     = 2.50   # TND — prise en charge fixe
-RATE_PER_KM   = 0.55   # TND / km
-RATE_PER_MIN  = 0.20   # TND / min
+BASE_FARE     = 3.50   # TND — prise en charge fixe
+RATE_PER_KM   = 0.65   # TND / km
+RATE_PER_MIN  = 0.30   # TND / min
 MIN_FARE      = 4.00   # TND — course minimale garantie
 
 # ══════════════════════════════════════════════════════════════════
@@ -223,9 +223,7 @@ BEACH_REASON_MAP: dict[str, int] = {
 # ══════════════════════════════════════════════════════════════════
 
 RAMADAN_TABLE: dict[int, tuple[str, str]] = {
-    2023: ("2023-03-22", "2023-04-20"),
-    2024: ("2024-03-11", "2024-04-09"),
-    2025: ("2025-03-01", "2025-03-29"),
+   
     2026: ("2026-02-18", "2026-03-19"),
     2027: ("2027-02-08", "2027-03-09"),
     2028: ("2028-01-28", "2028-02-25"),
