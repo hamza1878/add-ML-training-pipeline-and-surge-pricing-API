@@ -13,7 +13,7 @@ TRIPS = [
     {
         "label":      "hammamet → Aéroport (nuit 00h)",
         "lat_origin": 36.8625, "lon_origin": 10.1956,
-        "lat_dest":  36.420177, "lon_dest":  10.553902,
+        "lat_dest": 35.8256, "lon_dest": 10.63699,
         "zone_type":  "banlieue",
         "has_beach":  0, "population": 497_727, "intensite_ville": 4,
         "trafic_niveau": 1, "demande": "normal",

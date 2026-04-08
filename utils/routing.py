@@ -48,7 +48,7 @@ def get_osrm_distance(lat1, lon1, lat2, lon2):
     
     try:
         res = requests.get(url, timeout=10)
-        res.raise_for_status()  # تحقق من نجاح الطلب
+        res.raise_for_status() 
         data = res.json()
         
         route = data["routes"][0]
@@ -59,9 +59,7 @@ def get_osrm_distance(lat1, lon1, lat2, lon2):
     
     except (requests.RequestException, KeyError, IndexError) as e:
         print(f"⚠️ Erreur OSRM: {e}")
-        return None, None  # قيمة افتراضية عند الفشل
-
-# ── TEST ──
+        return None, None 
 point1 = (36.848097, 10.217551)
 point2 = (36.420177, 10.553902)
 

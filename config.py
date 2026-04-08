@@ -1,33 +1,24 @@
 from __future__ import annotations
 
-# ══════════════════════════════════════════════════════════════════
-# TARIF DE BASE
-# ══════════════════════════════════════════════════════════════════
+
 
 BASE_FARE     = 3.50   # TND — prise en charge fixe
 RATE_PER_KM   = 0.65   # TND / km
 RATE_PER_MIN  = 0.30   # TND / min
 MIN_FARE      = 4.00   # TND — course minimale garantie
 
-# ══════════════════════════════════════════════════════════════════
-# POIDS ENSEMBLE ML
-# ══════════════════════════════════════════════════════════════════
+
 
 W_XGB  = 0.55   # poids XGBoost
 W_LGBM = 0.45   # poids LightGBM
 
-# ══════════════════════════════════════════════════════════════════
-# MULTIPLICATEURS DE SURGE
-# ══════════════════════════════════════════════════════════════════
 
-# Trafic : 1=faible | 2=modéré | 3=élevé
 MULT_TRAFFIC: dict[int, float] = {
     1: 1.00,
     2: 1.20,
     3: 1.50,
 }
 
-# Météo : 1=clair | 2=pluie | 3=tempête | 4=sirocco
 MULT_WEATHER: dict[int, float] = {
     1: 1.00,
     2: 2.10,
@@ -35,18 +26,14 @@ MULT_WEATHER: dict[int, float] = {
     4: 1.10,
 }
 
-# Demande app
 MULT_DEMAND: dict[str, float] = {
     "normal": 1.00,
     "rush":   1.25,
     "surge":  1.60,
 }
 
-# Nuit (avant 06h ou après 20h)
 MULT_NIGHT: float = 1.20
 
-# ── Types de véhicules étendus ────────────────────────────────────
-# Economy | Standard | Comfort | First Class | Van | Mini Bus
 MULT_CAR: dict[str, float] = {
     "economy":     0.75,
     "standard":    0.90,
@@ -56,28 +43,23 @@ MULT_CAR: dict[str, float] = {
     "mini_bus":    1.50,
 }
 
-# Vendredi Jumu'ah — prière 11h–13h
 MULT_FRIDAY_JUMUAH: float = 1.40
 
-# Ramadan — créneaux spécifiques
 MULT_RAMADAN: dict[str, float] = {
-    "ramadan_iftar":         2.10,   # 17h45–18h15 (pic absolu)
-    "ramadan_tarawih":       1.30,   # ~22h
-    "ramadan_suhoor":        1.15,   # ~02h30
-    # ── NOUVEAU : dernière semaine de Ramadan (fin approche) ──────
-    "ramadan_last_week":     1.60,   # 7 derniers jours avant Aïd
+    "ramadan_iftar":         2.10,  
+    "ramadan_tarawih":       1.30,   
+    "ramadan_suhoor":        1.15,  
+    "ramadan_last_week":     1.60,  
     "none":                  1.00,
 }
 
-# Beach surge — par créneau
 MULT_BEACH: dict[str, float] = {
-    "afflux_matin":   1.25,   # 09h–11h
-    "après_midi":     1.30,   # 14h–16h
-    "coucher_soleil": 1.35,   # 19h–20h
+    "afflux_matin":   1.25,   
+    "après_midi":     1.30,   
+    "coucher_soleil": 1.35,   
     "none":           1.00,
 }
 
-# Zone géographique
 MULT_ZONE: dict[str, float] = {
     "capitale":   1.15,
     "banlieue":   1.05,
@@ -86,31 +68,21 @@ MULT_ZONE: dict[str, float] = {
     "sud":        0.95,
 }
 
-# ── NOUVEAU : Événements calendaires spéciaux ─────────────────────
-# Appliqués en addition sur le prix final (multiplié par-dessus surge)
-
 MULT_SPECIAL_EVENT: dict[str, float] = {
-    # Aïd el-Fitr — 3 premiers jours
     "aid_el_fitr":           2.00,
-    # Aïd el-Adha — semaine entière (grande mobilité familiale)
     "aid_el_adha_week":      1.80,
-    # Nuit du 31 décembre / 1er janvier
     "new_year_eve":          1.90,
-    # 2 et 3 janvier (premiers jours de la nouvelle année)
     "new_year_days":         1.40,
-    # Aucun événement spécial
     "none":                  1.00,
 }
 
-# ── NOUVEAU : Météo estimée par saison (si date hors plage API) ───
-# Températures moyennes Tunisie, vent moyen, précipitations moyennes
 ESTIMATED_WEATHER_BY_SEASON: dict[str, dict] = {
     "été": {
         "temperature_2m":  32.0,
         "windspeed_10m":   12.0,
         "precipitation":    0.0,
         "rain":             0.0,
-        "weather_code":     1,      # clair
+        "weather_code":     1,      
         "weather_label":   "clair",
         "weather_mult":    1.00,
         "weathercode_raw":  0,
@@ -121,7 +93,7 @@ ESTIMATED_WEATHER_BY_SEASON: dict[str, dict] = {
         "windspeed_10m":   14.0,
         "precipitation":    5.0,
         "rain":             5.0,
-        "weather_code":     2,      # légère pluie possible
+        "weather_code":     2,     
         "weather_label":   "pluie",
         "weather_mult":    1.10,
         "weathercode_raw":  61,
@@ -151,9 +123,6 @@ ESTIMATED_WEATHER_BY_SEASON: dict[str, dict] = {
     },
 }
 
-# ══════════════════════════════════════════════════════════════════
-# LABELS MÉTÉO
-# ══════════════════════════════════════════════════════════════════
 
 WEATHER_LABELS: dict[int, str] = {
     1: "clair",
@@ -162,9 +131,6 @@ WEATHER_LABELS: dict[int, str] = {
     4: "sirocco",
 }
 
-# ══════════════════════════════════════════════════════════════════
-# ENCODAGES CATÉGORIELS  (Feature engineering ML)
-# ══════════════════════════════════════════════════════════════════
 
 ZONE_MAP: dict[str, int] = {
     "capitale":   0,
@@ -180,7 +146,6 @@ DEMAND_MAP: dict[str, int] = {
     "surge":  2,
 }
 
-# ── NOUVEAU : encodage véhicules étendus ──────────────────────────
 CAR_MAP: dict[str, int] = {
     "economy":     1,
     "standard":    2,
@@ -202,7 +167,6 @@ PERIODE_MAP: dict[str, int] = {
     "ramadan_iftar":          6,
     "ramadan_tarawih":        7,
     "ramadan_suhoor":         8,
-    # ── NOUVEAU ──────────────────────────────────────────────────
     "ramadan_last_week":      9,
     "aid_el_fitr":           10,
     "aid_el_adha_week":      11,
@@ -218,9 +182,6 @@ BEACH_REASON_MAP: dict[str, int] = {
     "coucher_soleil": 3,
 }
 
-# ══════════════════════════════════════════════════════════════════
-# CALENDRIER RAMADAN (Tunisie, ±1 jour selon croissant)
-# ══════════════════════════════════════════════════════════════════
 
 RAMADAN_TABLE: dict[int, tuple[str, str]] = {
    
@@ -231,7 +192,6 @@ RAMADAN_TABLE: dict[int, tuple[str, str]] = {
     2030: ("2030-01-06", "2030-02-03"),
 }
 
-# ── NOUVEAU : Calendrier Aïd el-Adha (Tunisie, approximatif) ─────
 AID_ADHA_TABLE: dict[int, tuple[str, str]] = {
     2023: ("2023-06-27", "2023-07-04"),
     2024: ("2024-06-16", "2024-06-23"),
@@ -243,9 +203,6 @@ AID_ADHA_TABLE: dict[int, tuple[str, str]] = {
     2030: ("2030-04-14", "2030-04-21"),
 }
 
-# ══════════════════════════════════════════════════════════════════
-# PARAMÈTRES ML
-# ══════════════════════════════════════════════════════════════════
 
 XGB_PARAMS: dict = {
     "objective":        "reg:squarederror",
@@ -278,6 +235,5 @@ LGBM_PARAMS: dict = {
     "verbose":          -1,
 }
 
-# Colonne cible dans le CSV
 TARGET_COL   = "surge_multiplier"
 RANDOM_STATE = 42

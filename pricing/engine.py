@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime    import datetime
 from typing      import Optional
-
+import math
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -474,7 +474,14 @@ def _print_result(r: dict) -> None:
     print(f"│  Surge total  : ×{r['surge_multiplier']:.4f}{'':<{w-22}}│")
     min_note = " ← minimum" if r.get("min_applied") else ""
     print("╞" + "═"*w + "╡")
-    print(f"│  💰 PRIX FINAL : {r['final_price']:.2f} TND{min_note:<{w-26}}│")
+
+    prix = r['final_price']
+
+    prix_arrondi = math.ceil(prix / 5) * 5
+
+    print(f"│  💰 PRIX FINAL : {prix_arrondi} TND{min_note:<{w-26}}│")
+    print(f"  point bounes: {prix_arrondi} * 0.5 = {math.ceil(int(prix_arrondi * 0.5)/ 5)* 5} points de fidélité")
+
     print("└" + "─"*w + "┘")
 
 
