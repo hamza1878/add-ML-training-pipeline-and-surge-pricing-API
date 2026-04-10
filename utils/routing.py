@@ -60,13 +60,13 @@ def get_osrm_distance(lat1, lon1, lat2, lon2):
     except (requests.RequestException, KeyError, IndexError) as e:
         print(f"⚠️ Erreur OSRM: {e}")
         return None, None 
-point1 = (36.848097, 10.217551)
-point2 = (36.420177, 10.553902)
+# point1 = (36.848097, 10.217551)
+# point2 = (36.420177, 10.553902)
 
-distance, duration = get_osrm_distance(*point1, *point2)
+# distance, duration = get_osrm_distance(*point1, *point2)
 
-if distance is not None:
-    print(f"Distance réelle: {distance:.2f} km")
-    print(f"Durée: {duration:.2f} min")
-else:
-    print("Impossible de calculer la distance ou la durée.")
+# if distance is not None:
+#     print(f"Distance réelle: {distance:.2f} km")
+#     print(f"Durée: {duration:.2f} min")
+# else:
+#     print("Impossible de calculer la distance ou la durée.")

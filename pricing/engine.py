@@ -453,6 +453,7 @@ def _print_result(r: dict) -> None:
     print(f"│  Zone     : {r['zone_type']:<{w-13}}│")
     print(f"│  Météo    : {wth.get('weather_label','?').capitalize()}{weather_tag} {wth.get('temperature_2m','?')}°C | code={wth.get('weather_code','?'):<{w-40}}│")
     print(f"│  Heure    : {tf.get('heure_int', '?'):02}h  Saison : {tf.get('season','?'):<{w-25}}│")
+    print(f"│ beach_hour : {tf.get('is_beach_hour', 1)}  |  Raison : {tf.get('beach_peak_reason','none'):<{w-28}}│")
     if se != "none":
         print(f"│  🎉 Événement : {se:<{w-17}}│")
     if tf.get("is_ramadan_last_week"):
