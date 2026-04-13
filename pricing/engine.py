@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime    import datetime
 from typing      import Optional
-import math
+
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -21,7 +22,6 @@ from utils.geo_lookup import DatasetLookup
 from models.predictor import predictor
 
 # ── DatasetLookup singleton ───────────────────────────────────────
-# Cherche cleaned_data.csv puis le CSV brut en fallback
 _LOOKUP_CANDIDATES = ["cleaned_data.csv", "tunisia_all_cities_traffic.csv"]
 _dataset_lookup: Optional[DatasetLookup] = None
 
@@ -49,8 +49,7 @@ class CarType:
     VAN         = "van"
     MINI_BUS    = "mini_bus"
 
-    ALL = [ECONOMY, STANDARD, COMFORT, FIRST_CLASS, VAN, MINI_BUS]
-
+    ALL    = [ECONOMY, STANDARD, COMFORT, FIRST_CLASS, VAN, MINI_BUS]
     LABELS = {
         ECONOMY:     "Economy",
         STANDARD:    "Standard",
@@ -63,7 +62,7 @@ class CarType:
     @classmethod
     def normalize(cls, raw: str) -> str:
         s = raw.lower().strip().replace(" ", "_").replace("-", "_")
-        mapping = {
+        return {
             "economy":     cls.ECONOMY,
             "standard":    cls.STANDARD,
             "comfort":     cls.COMFORT,
@@ -74,8 +73,20 @@ class CarType:
             "van":         cls.VAN,
             "mini_bus":    cls.MINI_BUS,
             "minibus":     cls.MINI_BUS,
-        }
-        return mapping.get(s, cls.COMFORT)
+        }.get(s, cls.COMFORT)
+
+
+# ══════════════════════════════════════════════════════════════════
+# SURGE SAISONNIER  (haute / basse saison Tunisie)
+# ══════════════════════════════════════════════════════════════════
+# Représente la hausse structurelle de la demande selon la saison.
+# Distinct du weather_mult qui capte l'effet météo immédiat.
+_SEASON_SURGE: dict[str, float] = {
+    "été":       1.20,   # haute saison — tourisme + beach
+    "printemps": 1.10,   # épaule
+    "automne":   1.05,   # épaule basse
+    "hiver":     1.00,   # basse saison
+}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -84,14 +95,18 @@ class CarType:
 
 @dataclass
 class PriceResult:
-    base_fare:          float
-    distance_cost:      float
-    duration_cost:      float
-    raw_price:          float
-    surge_multiplier:   float
-    final_price:        float
-    currency:           str   = "TND"
-    min_applied:        bool  = False
+    base_fare:           float
+    distance_cost:       float
+    duration_cost:       float
+    raw_price:           float
+    surge_multiplier:    float
+    final_price:         float
+    final_price_rounded: float   # arrondi au 5 TND supérieur
+    loyalty_points:      int     # prix_arrondi × 0.5, arrondi au 5 pts
+    currency:            str   = "TND"
+    min_applied:         bool  = False
+
+    # ── Détail de chaque multiplicateur ──────────────────────────
     mult_traffic:       float = 1.0
     mult_weather:       float = 1.0
     mult_demand:        float = 1.0
@@ -102,41 +117,56 @@ class PriceResult:
     mult_beach:         float = 1.0
     mult_zone:          float = 1.0
     mult_special_event: float = 1.0
-    ml_used:            bool  = False
-    ml_surge_xgb:       Optional[float] = None
-    ml_surge_lgbm:      Optional[float] = None
-    ml_confidence:      Optional[float] = None
-    source:             str   = "Règles métier"
-    labels:             dict  = field(default_factory=dict)
+    mult_season:        float = 1.0
+
+    ml_used:       bool            = False
+    ml_surge_xgb:  Optional[float] = None
+    ml_surge_lgbm: Optional[float] = None
+    ml_confidence: Optional[float] = None
+
+    source: str  = "Règles métier"
+    labels: dict = field(default_factory=dict)
 
 
 # ══════════════════════════════════════════════════════════════════
-# CALCUL PAR RÈGLES MÉTIER
+# HELPER — résolution centralisée de TOUS les multiplicateurs
 # ══════════════════════════════════════════════════════════════════
 
-def compute_price_rules(
-    distance_km:  float,
-    duration_min: float,
-    row:          dict,
-    car_type:     str = CarType.COMFORT,
-) -> PriceResult:
-    car_type = CarType.normalize(car_type)
+def _resolve_multipliers(row: dict, car_type: str) -> dict:
+    """
+    Extrait chaque multiplicateur depuis `row` + config.py.
+    Source unique de vérité — utilisée par les deux fonctions
+    compute_price_rules ET compute_price_ml.
+    """
+    # Trafic
+    m_traffic = MULT_TRAFFIC.get(int(row.get("trafic_niveau", 1)), 1.0)
 
-    dist_cost = round(distance_km  * RATE_PER_KM,  2)
-    dur_cost  = round(duration_min * RATE_PER_MIN,  2)
-    raw       = round(BASE_FARE + dist_cost + dur_cost, 2)
+    # Météo — on préfère weather_mult (déjà calculé par fetch_weather)
+    # car il intègre la détection sirocco et la conversion WMO.
+    m_weather = float(
+        row.get("weather_mult")
+        or MULT_WEATHER.get(int(row.get("weather_code", 1)), 1.0)
+    )
 
-    m_traffic = MULT_TRAFFIC.get(int(row.get("trafic_niveau",  1)), 1.0)
-    m_weather = MULT_WEATHER.get(int(row.get("weather_code",   1)), 1.0)
-    m_demand  = MULT_DEMAND.get(str(row.get("demande", "normal")), 1.0)
-    m_night   = MULT_NIGHT if row.get("is_night") else 1.0
-    m_car     = MULT_CAR.get(car_type, 1.0)
-    m_friday  = MULT_FRIDAY_JUMUAH if row.get("is_friday_slot") else 1.0
-    m_zone    = MULT_ZONE.get(str(row.get("zone_type", "intérieure")), 1.0)
+    # Demande app
+    m_demand = MULT_DEMAND.get(str(row.get("demande", "normal")).lower(), 1.0)
 
+    # Nuit (MULT_NIGHT = 2.20 selon config)
+    m_night = MULT_NIGHT if row.get("is_night") else 1.0
+
+    # Véhicule
+    m_car = MULT_CAR.get(CarType.normalize(car_type), 1.0)
+
+    # Vendredi Jumu'ah
+    m_friday = MULT_FRIDAY_JUMUAH if row.get("is_friday_slot") else 1.0
+
+    # Zone géographique
+    m_zone = MULT_ZONE.get(str(row.get("zone_type", "intérieure")).lower(), 1.0)
+
+    # Ramadan / fin Ramadan
     ram_key = "none"
     if row.get("is_aid_el_fitr"):
-        ram_key = "none"
+        ram_key = "none"                   # Aïd el-Fitr géré par special_event
     elif row.get("is_ramadan_slot"):
         p = str(row.get("periode", "")).lower()
         if   "iftar"  in p: ram_key = "ramadan_iftar"
@@ -147,53 +177,122 @@ def compute_price_rules(
         ram_key = "ramadan_last_week"
     m_ramadan = MULT_RAMADAN.get(ram_key, 1.0)
 
+    # Beach surge
     beach_key = (
         str(row.get("beach_peak_reason", "none"))
         if row.get("is_beach_hour") else "none"
     )
     m_beach = MULT_BEACH.get(beach_key, 1.0)
 
-    special   = str(row.get("special_event", "none"))
+    # Événement spécial (Aïd el-Fitr, Aïd el-Adha, Nouvel An)
+    special = str(row.get("special_event", "none")).lower()
     m_special = MULT_SPECIAL_EVENT.get(special, 1.0)
 
-    surge = round(
-        m_traffic * m_weather * m_demand * m_night
-        * m_car * m_friday * m_ramadan * m_beach * m_zone * m_special,
-        4,
-    )
+    # Saison
+    season = str(row.get("season", "été")).lower()
+    m_season = _SEASON_SURGE.get(season, 1.0)
+
+    return {
+        "m_traffic":  m_traffic,
+        "m_weather":  m_weather,
+        "m_demand":   m_demand,
+        "m_night":    m_night,
+        "m_car":      m_car,
+        "m_friday":   m_friday,
+        "m_zone":     m_zone,
+        "m_ramadan":  m_ramadan,
+        "m_beach":    m_beach,
+        "m_special":  m_special,
+        "m_season":   m_season,
+        "ram_key":    ram_key,
+        "beach_key":  beach_key,
+        "special":    special,
+        "season":     season,
+    }
+
+
+def _build_labels(row: dict, m: dict) -> dict:
+    ct = CarType.normalize(row.get("car_type", "comfort"))
+    return {
+        "traffic":       f"×{m['m_traffic']}  (niveau {row.get('trafic_niveau',1)})",
+        "weather":       f"×{m['m_weather']}  (code {row.get('weather_code',1)} — {row.get('weather_label','?')})",
+        "demand":        f"×{m['m_demand']}  ({row.get('demande','normal')})",
+        "night":         f"×{m['m_night']}  (is_night={row.get('is_night',0)})",
+        "car":           f"×{m['m_car']}  ({ct} — {CarType.LABELS.get(ct,'')})",
+        "friday":        f"×{m['m_friday']}  (is_friday={row.get('is_friday_slot',0)})",
+        "ramadan":       f"×{m['m_ramadan']}  ({m['ram_key']})",
+        "beach":         f"×{m['m_beach']}  ({m['beach_key']})",
+        "zone":          f"×{m['m_zone']}  ({row.get('zone_type','intérieure')})",
+        "special_event": f"×{m['m_special']}  ({m['special']})",
+        "season":        f"×{m['m_season']}  ({m['season']})",
+    }
+
+
+def _finalize(raw: float, surge: float) -> tuple[float, float, int, bool]:
+    """Prix final → arrondi 5 TND → points fidélité."""
     final = round(raw * surge, 2)
     min_applied = False
     if final < MIN_FARE:
         final, min_applied = MIN_FARE, True
+    rounded = int(math.ceil(final / 5) * 5)
+    loyalty = int(math.ceil(rounded * 0.5 / 5) * 5)
+    return final, float(rounded), loyalty, min_applied
 
-    labels = {
-        "traffic":       f"×{m_traffic} (niveau {row.get('trafic_niveau', 1)})",
-        "weather":       f"×{m_weather} (code {row.get('weather_code', 1)} — {row.get('weather_label','?')})",
-        "demand":        f"×{m_demand}  ({row.get('demande', 'normal')})",
-        "night":         f"×{m_night}   (is_night={row.get('is_night', 0)})",
-        "car":           f"×{m_car}     ({car_type} — {CarType.LABELS.get(car_type, car_type)})",
-        "friday":        f"×{m_friday}  (is_friday={row.get('is_friday_slot', 0)})",
-        "ramadan":       f"×{m_ramadan} ({ram_key})",
-        "beach":         f"×{m_beach}   ({beach_key})",
-        "zone":          f"×{m_zone}    ({row.get('zone_type', 'intérieure')})",
-        "special_event": f"×{m_special} ({special})",
-    }
+
+# ══════════════════════════════════════════════════════════════════
+# CALCUL PAR RÈGLES MÉTIER PURES
+# ══════════════════════════════════════════════════════════════════
+
+def compute_price_rules(
+    distance_km:  float,
+    duration_min: float,
+    row:          dict,
+    car_type:     str = CarType.COMFORT,
+) -> PriceResult:
+    """
+    Prix basé uniquement sur les règles métier du config.
+    Multiplie : trafic × météo × demande × nuit × véhicule
+               × vendredi × ramadan × beach × zone × spécial × saison
+    """
+    car_type = CarType.normalize(car_type)
+    row = {**row, "car_type": car_type}
+
+    dist_cost = round(distance_km  * RATE_PER_KM,  2)
+    dur_cost  = round(duration_min * RATE_PER_MIN,  2)
+    raw       = round(BASE_FARE + dist_cost + dur_cost, 2)
+
+    m = _resolve_multipliers(row, car_type)
+
+    surge = round(
+        m["m_traffic"] * m["m_weather"] * m["m_demand"]
+        * m["m_night"] * m["m_car"]    * m["m_friday"]
+        * m["m_ramadan"] * m["m_beach"] * m["m_zone"]
+        * m["m_special"] * m["m_season"],
+        4,
+    )
+
+    final, rounded, loyalty, min_applied = _finalize(raw, surge)
 
     return PriceResult(
         base_fare=BASE_FARE, distance_cost=dist_cost, duration_cost=dur_cost,
-        raw_price=raw, surge_multiplier=surge, final_price=final,
+        raw_price=raw, surge_multiplier=surge,
+        final_price=final, final_price_rounded=rounded, loyalty_points=loyalty,
         min_applied=min_applied,
-        mult_traffic=m_traffic, mult_weather=m_weather, mult_demand=m_demand,
-        mult_night=m_night, mult_car=m_car, mult_friday=m_friday,
-        mult_ramadan=m_ramadan, mult_beach=m_beach, mult_zone=m_zone,
-        mult_special_event=m_special,
-        ml_used=False, source="Règles métier pures", labels=labels,
+        mult_traffic=m["m_traffic"],     mult_weather=m["m_weather"],
+        mult_demand=m["m_demand"],       mult_night=m["m_night"],
+        mult_car=m["m_car"],             mult_friday=m["m_friday"],
+        mult_ramadan=m["m_ramadan"],     mult_beach=m["m_beach"],
+        mult_zone=m["m_zone"],           mult_special_event=m["m_special"],
+        mult_season=m["m_season"],
+        ml_used=False, source="Règles métier pures",
+        labels=_build_labels(row, m),
     )
 
 
 # ══════════════════════════════════════════════════════════════════
-# CALCUL VIA SURGE ML
+# CALCUL VIA SURGE ML  (ML × règles métier)
 # ══════════════════════════════════════════════════════════════════
+
 def compute_price_ml(
     distance_km:  float,
     duration_min: float,
@@ -201,111 +300,59 @@ def compute_price_ml(
     ml_surge:     float,
     car_type:     str = CarType.COMFORT,
 ) -> PriceResult:
-    car_type  = CarType.normalize(car_type)
+    """
+    Fusionne le surge ML avec les règles métier.
+
+    ML a appris     : trafic, météo, demande, heure (capturés en training)
+    Règles forcées  : nuit × zone × vendredi × ramadan × beach
+                      × véhicule × événement_spécial × saison
+
+    Ces règles sont appliquées multiplicativement PAR-DESSUS ml_surge
+    afin d'intégrer tous les facteurs du config.
+    """
+    car_type = CarType.normalize(car_type)
+    row = {**row, "car_type": car_type}
+
     dist_cost = round(distance_km  * RATE_PER_KM,  2)
     dur_cost  = round(duration_min * RATE_PER_MIN,  2)
     raw       = round(BASE_FARE + dist_cost + dur_cost, 2)
-    m_car     = MULT_CAR.get(car_type, 1.0)
-    special   = str(row.get("special_event", "none"))
-    m_special = MULT_SPECIAL_EVENT.get(special, 1.0)
 
-    # ── Multiplicateurs métier obligatoires (non capturés par le ML) ──
-    m_night   = MULT_NIGHT if row.get("is_night") else 1.0
-    m_zone    = MULT_ZONE.get(str(row.get("zone_type", "intérieure")), 1.0)
-    m_friday  = MULT_FRIDAY_JUMUAH if row.get("is_friday_slot") else 1.0
+    m = _resolve_multipliers(row, car_type)
 
-    ram_key = "none"
-    if row.get("is_ramadan_slot"):
-        p = str(row.get("periode", "")).lower()
-        if   "iftar"  in p: ram_key = "ramadan_iftar"
-        elif "taraw"  in p: ram_key = "ramadan_tarawih"
-        elif "suhoor" in p: ram_key = "ramadan_suhoor"
-        else:               ram_key = "ramadan_iftar"
-    elif row.get("is_ramadan_last_week"):
-        ram_key = "ramadan_last_week"
-    m_ramadan = MULT_RAMADAN.get(ram_key, 1.0)
-
-    beach_key = (
-        str(row.get("beach_peak_reason", "none"))
-        if row.get("is_beach_hour") else "none"
-    )
-    m_beach = MULT_BEACH.get(beach_key, 1.0)
-
-    # ── Fusion ML × règles métier ──────────────────────────────────
-    # ML gère : trafic, météo, demande (il les a vus en training)
-    # Règles forcées : nuit, zone, vendredi, ramadan, beach, car, special
-    surge_total = round(
-        ml_surge
-        * m_night
-        * m_zone
-        * m_friday
-        * m_ramadan
-        * m_beach
-        * m_car
-        * m_special,
+    # Règles métier non capturées par le ML
+    surge_rules = round(
+        m["m_night"]   * m["m_zone"]    * m["m_friday"]
+        * m["m_ramadan"] * m["m_beach"] * m["m_car"]
+        * m["m_special"] * m["m_season"],
         4,
     )
 
-    final = round(raw * surge_total, 2)
-    min_applied = False
-    if final < MIN_FARE:
-        final, min_applied = MIN_FARE, True
+    surge_total = round(ml_surge * surge_rules, 4)
+    final, rounded, loyalty, min_applied = _finalize(raw, surge_total)
 
-    rules = compute_price_rules(distance_km, duration_min, row, car_type)
-    rules.surge_multiplier  = surge_total
-    rules.final_price       = final
-    rules.min_applied       = min_applied
-    rules.mult_night        = m_night
-    rules.mult_zone         = m_zone
-    rules.mult_friday       = m_friday
-    rules.mult_ramadan      = m_ramadan
-    rules.mult_beach        = m_beach
-    rules.ml_used           = True
-    rules.source = (
-        f"ML ensemble (XGB×0.55 + LGBM×0.45) × règles métier  "
-        f"surge_ml={ml_surge:.4f}  night=×{m_night}  zone=×{m_zone}  "
-        f"car=×{m_car}  special=×{m_special} ({special})"
+    labels = _build_labels(row, m)
+    labels["ml_raw"]    = f"surge_ML={ml_surge:.4f}"
+    labels["ml_rules"]  = f"règles_métier=×{surge_rules:.4f}"
+    labels["ml_fusion"] = f"total=×{ml_surge:.4f} × ×{surge_rules:.4f} = ×{surge_total:.4f}"
+
+    return PriceResult(
+        base_fare=BASE_FARE, distance_cost=dist_cost, duration_cost=dur_cost,
+        raw_price=raw, surge_multiplier=surge_total,
+        final_price=final, final_price_rounded=rounded, loyalty_points=loyalty,
+        min_applied=min_applied,
+        mult_traffic=m["m_traffic"],     mult_weather=m["m_weather"],
+        mult_demand=m["m_demand"],       mult_night=m["m_night"],
+        mult_car=m["m_car"],             mult_friday=m["m_friday"],
+        mult_ramadan=m["m_ramadan"],     mult_beach=m["m_beach"],
+        mult_zone=m["m_zone"],           mult_special_event=m["m_special"],
+        mult_season=m["m_season"],
+        ml_used=True,
+        source=(
+            f"ML (XGB×0.55 + LGBM×0.45) × règles métier | "
+            f"surge_ml={ml_surge:.4f} × règles={surge_rules:.4f} = ×{surge_total:.4f}"
+        ),
+        labels=labels,
     )
-    rules.labels["ml"] = (
-        f"surge_ml={ml_surge:.4f} × night={m_night} × zone={m_zone} "
-        f"× friday={m_friday} × ramadan={m_ramadan} × beach={m_beach} "
-        f"× car={m_car} × special={m_special}"
-    )
-    return rules
-# def compute_price_ml(
-#     distance_km:  float,
-#     duration_min: float,
-#     row:          dict,
-#     ml_surge:     float,
-#     car_type:     str = CarType.COMFORT,
-# ) -> PriceResult:
-#     car_type  = CarType.normalize(car_type)
-#     dist_cost = round(distance_km  * RATE_PER_KM,  2)
-#     dur_cost  = round(duration_min * RATE_PER_MIN,  2)
-#     raw       = round(BASE_FARE + dist_cost + dur_cost, 2)
-#     m_car     = MULT_CAR.get(car_type, 1.0)
-#     special   = str(row.get("special_event", "none"))
-#     m_special = MULT_SPECIAL_EVENT.get(special, 1.0)
-
-#     surge_total = round(ml_surge * m_car * m_special, 4)
-#     final       = round(raw * surge_total, 2)
-#     min_applied = False
-#     if final < MIN_FARE:
-#         final, min_applied = MIN_FARE, True
-
-#     rules = compute_price_rules(distance_km, duration_min, row, car_type)
-#     rules.surge_multiplier  = surge_total
-#     rules.final_price       = final
-#     rules.min_applied       = min_applied
-#     rules.ml_used           = True
-#     rules.source            = (
-#         f"ML ensemble (XGB×0.55 + LGBM×0.45)  "
-#         f"surge_raw={ml_surge:.4f}  car=×{m_car}  special=×{m_special} ({special})"
-#     )
-#     rules.labels["ml"] = (
-#         f"surge_ml={ml_surge:.4f} × car={m_car} × special={m_special}"
-#     )
-#     return rules
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -330,23 +377,12 @@ def calculate_trip_price(
     car_type:          str   = CarType.COMFORT,
     booking_dt:        datetime | None = None,
     use_ml:            bool  = True,
-    dataset_csv:       str   = "",   # chemin optionnel vers le CSV pour geo_lookup
+    dataset_csv:       str   = "",
 ) -> dict:
-    """
-    Pipeline complet Moviroo.
-
-    NOUVEAU :
-      • geo_lookup : cherche les coordonnées dans le dataset (rayon 20 km)
-        et enrichit automatiquement zone_type, has_beach, population,
-        intensite_ville si un point est trouvé.
-      • La météo (weather_code, temperature_2m, windspeed_10m, precipitation)
-        est transmise au ML dans le row — le modèle la voit maintenant.
-    """
     if booking_dt is None:
         booking_dt = datetime.now()
 
     car_type = CarType.normalize(car_type)
-
     _sep("MOVIROO — Calcul prix dynamique")
     print(f"  Véhicule : {CarType.LABELS.get(car_type, car_type)}")
 
@@ -360,78 +396,70 @@ def calculate_trip_price(
     # ── 2. Geo Lookup ─────────────────────────────────────────────
     _step(2, "Geo Lookup — dataset")
     lookup = _get_lookup()
-    geo_meta_origin = None
-    geo_meta_dest   = None
+    geo_meta_origin = geo_meta_dest = None
 
     if lookup and lookup.loaded:
         geo_meta_origin = lookup.find_nearest(lat_origin, lon_origin)
         geo_meta_dest   = lookup.find_nearest(lat_dest,   lon_dest)
 
-    # Enrichissement depuis le dataset si trouvé (origine prioritaire)
     geo_meta = geo_meta_origin or geo_meta_dest
     if geo_meta:
-        # On surcharge uniquement si les valeurs passées sont les défauts
         zone_type       = geo_meta.get("zone_type",       zone_type)
         has_beach       = int(geo_meta.get("has_beach",   has_beach))
         population      = int(geo_meta.get("population",  population))
         intensite_ville = int(geo_meta.get("intensite_ville", intensite_ville))
-        ville_label     = geo_meta.get("ville", "?")
-        print(f"     ✅ Origine : {ville_label} / {zone_type} | beach={has_beach}")
+        print(f"     ✅ {geo_meta.get('ville','?')} / {zone_type} | beach={has_beach}")
     else:
-        print("     ℹ️  Coordonnées hors dataset — valeurs fournies conservées")
+        print("     ℹ️  Hors dataset — valeurs fournies conservées")
 
     if geo_meta_dest and geo_meta_dest != geo_meta_origin:
-        print(f"     ✅ Destination : {geo_meta_dest.get('ville','?')} / {geo_meta_dest.get('zone_type','?')}")
+        print(f"     ✅ Dest : {geo_meta_dest.get('ville','?')} / {geo_meta_dest.get('zone_type','?')}")
 
     # ── 3. Météo ──────────────────────────────────────────────────
     _step(3, "Météo Open-Meteo")
     weather = fetch_weather(lat_origin, lon_origin, booking_dt)
-    estimated_tag = " [ESTIMÉE]" if weather.get("weather_estimated") else ""
+    est = " [ESTIMÉE]" if weather.get("weather_estimated") else ""
     print(
-        f"     {weather['weather_label'].capitalize()}{estimated_tag} | "
-        f"{weather['temperature_2m']}°C | "
-        f"Vent {weather['windspeed_10m']} km/h | "
-        f"is_night={weather['is_night']}"
+        f"     {weather['weather_label'].capitalize()}{est} | "
+        f"{weather['temperature_2m']}°C | vent {weather['windspeed_10m']} km/h | "
+        f"is_night={weather['is_night']} | mult=×{weather['weather_mult']}"
     )
 
     # ── 4. Flags temporels ────────────────────────────────────────
     _step(4, "Flags temporels & culturels")
     time_flags  = compute_time_flags(booking_dt)
     beach_flags = compute_beach_flags(has_beach, booking_dt)
-    print(f"     Période : {time_flags['periode']}  |  Saison : {time_flags['season']}")
 
     se = time_flags.get("special_event", "none")
+    print(f"     Période : {time_flags['periode']}  |  Saison : {time_flags['season']}")
     if se != "none":
-        print(f"     🎉 Événement : {se}  (×{MULT_SPECIAL_EVENT.get(se, 1.0)})")
+        print(f"     🎉 Événement : {se}  (×{MULT_SPECIAL_EVENT.get(se,1.0)})")
     if time_flags.get("is_ramadan_last_week"):
-        print(f"     🌙 Dernière semaine Ramadan (×{MULT_RAMADAN['ramadan_last_week']})")
+        print(f"     🌙 Fin Ramadan (×{MULT_RAMADAN['ramadan_last_week']})")
     if beach_flags["is_beach_hour"]:
-        print(
-            f"     🏖️  Beach surge ×{beach_flags['beach_surge_value']} "
-            f"({beach_flags['beach_peak_reason']})"
-        )
+        print(f"     🏖️  Beach ×{beach_flags['beach_surge_value']} ({beach_flags['beach_peak_reason']})")
 
-    # ── Assemblage du contexte ─────────────────────────────────
+    # ── Assemblage du contexte row ────────────────────────────────
     row = {
-        "zone_type":           zone_type,
-        "has_beach":           has_beach,
-        "population":          population,
-        "intensite_ville":     intensite_ville,
-        "trafic_niveau":       trafic_niveau,
-        "demande":             demande,
-        "indice_congestion":   indice_congestion,
-        "retard_estime_min":   retard_estime_min,
-        "vitesse_moy_kmh":     vitesse_moy_kmh,
-        "chauffeurs_actifs":   chauffeurs_actifs,
-        "car_type":            car_type,
-        # Météo — transmise au ML (CORRECTIF)
-        "weather_code":        weather["weather_code"],
-        "weather_label":       weather["weather_label"],
-        "temperature_2m":      weather["temperature_2m"],
-        "windspeed_10m":       weather["windspeed_10m"],
-        "precipitation":       weather.get("precipitation", 0.0),
-        "is_night":            weather["is_night"],
-        # Flags
+        "zone_type":         zone_type,
+        "has_beach":         has_beach,
+        "population":        population,
+        "intensite_ville":   intensite_ville,
+        "trafic_niveau":     trafic_niveau,
+        "demande":           demande,
+        "indice_congestion": indice_congestion,
+        "retard_estime_min": retard_estime_min,
+        "vitesse_moy_kmh":   vitesse_moy_kmh,
+        "chauffeurs_actifs": chauffeurs_actifs,
+        "car_type":          car_type,
+        # Météo — clé weather_mult transmise pour usage direct
+        "weather_code":      weather["weather_code"],
+        "weather_label":     weather["weather_label"],
+        "weather_mult":      weather["weather_mult"],   # ← direct depuis config
+        "temperature_2m":    weather["temperature_2m"],
+        "windspeed_10m":     weather["windspeed_10m"],
+        "precipitation":     weather.get("precipitation", 0.0),
+        "is_night":          weather["is_night"],
         **time_flags,
         **beach_flags,
     }
@@ -462,43 +490,46 @@ def calculate_trip_price(
         print(f"     Règles métier pures (ML {reason})")
         result = compute_price_rules(distance_km, duration_min, row, car_type)
 
-    # ── 6. Résultat ───────────────────────────────────────────────
+    # ── 6. Sortie ─────────────────────────────────────────────────
     output = {
-        "base_fare":          result.base_fare,
-        "distance_cost":      result.distance_cost,
-        "duration_cost":      result.duration_cost,
-        "raw_price":          result.raw_price,
-        "surge_multiplier":   result.surge_multiplier,
-        "final_price":        result.final_price,
-        "currency":           "TND",
-        "min_applied":        result.min_applied,
-        "mult_traffic":       result.mult_traffic,
-        "mult_weather":       result.mult_weather,
-        "mult_demand":        result.mult_demand,
-        "mult_night":         result.mult_night,
-        "mult_car":           result.mult_car,
-        "mult_friday":        result.mult_friday,
-        "mult_ramadan":       result.mult_ramadan,
-        "mult_beach":         result.mult_beach,
-        "mult_zone":          result.mult_zone,
-        "mult_special_event": result.mult_special_event,
-        "ml_used":            result.ml_used,
-        "ml_surge_xgb":       result.ml_surge_xgb,
-        "ml_surge_lgbm":      result.ml_surge_lgbm,
-        "ml_confidence":      result.ml_confidence,
-        "source":             result.source,
-        "labels":             result.labels,
-        "distance_km":        distance_km,
-        "duration_min":       duration_min,
-        "car_type":           car_type,
-        "car_type_label":     CarType.LABELS.get(car_type, car_type),
-        "zone_type":          zone_type,
-        "booking_dt":         booking_dt.isoformat(),
-        "weather":            weather,
-        "time_flags":         time_flags,
-        "beach_flags":        beach_flags,
-        "geo_origin":         geo_meta_origin,
-        "geo_dest":           geo_meta_dest,
+        "base_fare":            result.base_fare,
+        "distance_cost":        result.distance_cost,
+        "duration_cost":        result.duration_cost,
+        "raw_price":            result.raw_price,
+        "surge_multiplier":     result.surge_multiplier,
+        "final_price":          result.final_price,
+        "final_price_rounded":  result.final_price_rounded,
+        "loyalty_points":       result.loyalty_points,
+        "currency":             "TND",
+        "min_applied":          result.min_applied,
+        "mult_traffic":         result.mult_traffic,
+        "mult_weather":         result.mult_weather,
+        "mult_demand":          result.mult_demand,
+        "mult_night":           result.mult_night,
+        "mult_car":             result.mult_car,
+        "mult_friday":          result.mult_friday,
+        "mult_ramadan":         result.mult_ramadan,
+        "mult_beach":           result.mult_beach,
+        "mult_zone":            result.mult_zone,
+        "mult_special_event":   result.mult_special_event,
+        "mult_season":          result.mult_season,
+        "ml_used":              result.ml_used,
+        "ml_surge_xgb":         result.ml_surge_xgb,
+        "ml_surge_lgbm":        result.ml_surge_lgbm,
+        "ml_confidence":        result.ml_confidence,
+        "source":               result.source,
+        "labels":               result.labels,
+        "distance_km":          distance_km,
+        "duration_min":         duration_min,
+        "car_type":             car_type,
+        "car_type_label":       CarType.LABELS.get(car_type, car_type),
+        "zone_type":            zone_type,
+        "booking_dt":           booking_dt.isoformat(),
+        "weather":              weather,
+        "time_flags":           time_flags,
+        "beach_flags":          beach_flags,
+        "geo_origin":           geo_meta_origin,
+        "geo_dest":             geo_meta_dest,
     }
 
     _print_result(output)
@@ -506,67 +537,91 @@ def calculate_trip_price(
 
 
 # ══════════════════════════════════════════════════════════════════
-# AFFICHAGE
+# AFFICHAGE RÉCAPITULATIF
 # ══════════════════════════════════════════════════════════════════
 
 def _print_result(r: dict) -> None:
-    w   = 58
+    W   = 58
     ml  = r.get("ml_surge_xgb") is not None
     wth = r.get("weather", {})
     tf  = r.get("time_flags", {})
+    bf  = r.get("beach_flags", {})
     se  = tf.get("special_event", "none")
-    weather_tag = " [estimée]" if wth.get("weather_estimated") else ""
+    est = " [estimée]" if wth.get("weather_estimated") else ""
     geo = r.get("geo_origin") or {}
-    ville = geo.get("ville", "")
-    dist_geo = f" ({geo.get('distance_km', '?')} km du dataset)" if geo else " (hors dataset)"
 
-    print("\n┌" + "─"*w + "┐")
-    print(f"│  💳  RÉCAPITULATIF COURSE{'':<{w-26}}│")
-    print("├" + "─"*w + "┤")
-    print(f"│  Distance : {r['distance_km']:.2f} km  /  {r['duration_min']:.1f} min{'':<{w-37}}│")
-    print(f"│  Véhicule : {r.get('car_type_label', r['car_type']):<{w-13}}│")
-    if ville:
-        print(f"│  Ville    : {ville}{dist_geo:<{w-13-len(ville)}}│")
-    print(f"│  Zone     : {r['zone_type']:<{w-13}}│")
-    print(f"│  Météo    : {wth.get('weather_label','?').capitalize()}{weather_tag} {wth.get('temperature_2m','?')}°C | code={wth.get('weather_code','?'):<{w-40}}│")
-    print(f"│  Heure    : {tf.get('heure_int', '?'):02}h  Saison : {tf.get('season','?'):<{w-25}}│")
-    print(f"│ beach_hour : {tf.get('is_beach_hour', 1)}  |  Raison : {tf.get('beach_peak_reason','none'):<{w-28}}│")
+    def row(label: str, value: str) -> None:
+        line = f"│  {label:<20}: {value}"
+        print(line + " " * max(0, W + 2 - len(line) - 1) + "│")
+
+    def hline(c="─"): print("├" + c * W + "┤")
+
+    print("\n┌" + "─" * W + "┐")
+    print(f"│{'  💳  RÉCAPITULATIF COURSE':^{W + 1}}│")
+    hline()
+    row("Véhicule",  r.get("car_type_label", r["car_type"]))
+    if geo.get("ville"):
+        row("Ville", f"{geo['ville']}  ({geo.get('distance_km','?')} km dataset)")
+    row("Zone",      r["zone_type"])
+    row("Saison",    tf.get("season", "?"))
+    row("Heure",     f"{tf.get('heure_int','?'):02}h — {tf.get('periode','?')}")
+    row("Météo",     f"{wth.get('weather_label','?').capitalize()}{est}  {wth.get('temperature_2m','?')}°C  code={wth.get('weather_code','?')}")
+    if bf.get("is_beach_hour"):
+        row("Beach",   f"×{bf.get('beach_surge_value',1.0)}  ({bf.get('beach_peak_reason','?')})")
     if se != "none":
-        print(f"│  🎉 Événement : {se:<{w-17}}│")
+        row("Événement", f"{se}  (×{r.get('mult_special_event',1.0)})")
     if tf.get("is_ramadan_last_week"):
-        print(f"│  🌙 Fin Ramadan (dernière semaine){'':<{w-36}}│")
-    print("├" + "─"*w + "┤")
-    print(f"│  Base       : {BASE_FARE:.2f} TND{'':<{w-22}}│")
-    print(f"│  Distance   : {r['distance_cost']:.2f} TND{'':<{w-22}}│")
-    print(f"│  Durée      : {r['duration_cost']:.2f} TND{'':<{w-22}}│")
-    print(f"│  Brut       : {r['raw_price']:.2f} TND{'':<{w-22}}│")
-    print("├" + "─"*w + "┤")
-    print(f"│  Mult trafic  : ×{r['mult_traffic']}{'':<{w-20}}│")
-    print(f"│  Mult météo   : ×{r['mult_weather']}  (weather_code={wth.get('weather_code','?')}){'':<{w-44}}│")
-    if r.get("mult_special_event", 1.0) != 1.0:
-        print(f"│  Mult spécial : ×{r['mult_special_event']} ({se}){'':<{w-32}}│")
+        row("Ramadan", "dernière semaine")
+
+    hline()
+    row("Base",      f"{r['base_fare']:.2f} TND")
+    row("Distance",  f"{r['distance_km']:.2f} km → {r['distance_cost']:.2f} TND")
+    row("Durée",     f"{r['duration_min']:.1f} min → {r['duration_cost']:.2f} TND")
+    row("Prix brut", f"{r['raw_price']:.2f} TND")
+
+    hline()
+    mults = [
+        ("Trafic",   r["mult_traffic"]),
+        ("Météo",    r["mult_weather"]),
+        ("Demande",  r["mult_demand"]),
+        ("Nuit",     r["mult_night"]),
+        ("Véhicule", r["mult_car"]),
+        ("Zone",     r["mult_zone"]),
+        ("Vendredi", r["mult_friday"]),
+        ("Ramadan",  r["mult_ramadan"]),
+        ("Beach",    r["mult_beach"]),
+        ("Saison",   r["mult_season"]),
+        ("Spécial",  r["mult_special_event"]),
+    ]
+    for name, val in mults:
+        tag = "  ◀" if val != 1.0 else ""
+        row(f"  ×{name}", f"{val:.4f}{tag}")
+
     if ml:
-        print(f"│  XGB          : ×{r['ml_surge_xgb']:.4f}{'':<{w-22}}│")
-        print(f"│  LGBM         : ×{r['ml_surge_lgbm']:.4f}{'':<{w-22}}│")
-        print(f"│  Confiance    : {r.get('ml_confidence',0)*100:.1f}%{'':<{w-19}}│")
-    print(f"│  Surge total  : ×{r['surge_multiplier']:.4f}{'':<{w-22}}│")
-    min_note = " ← minimum" if r.get("min_applied") else ""
-    print("╞" + "═"*w + "╡")
+        hline()
+        row("  XGBoost",   f"×{r['ml_surge_xgb']:.4f}")
+        row("  LightGBM",  f"×{r['ml_surge_lgbm']:.4f}")
+        row("  Confiance", f"{r.get('ml_confidence',0)*100:.1f}%")
 
-    prix = r['final_price']
+    hline("═")
+    row("SURGE TOTAL", f"×{r['surge_multiplier']:.4f}")
+    hline("═")
 
-    prix_arrondi = math.ceil(prix / 5) * 5
+    exact   = r["final_price"]
+    rounded = int(r["final_price_rounded"])
+    pts     = r["loyalty_points"]
+    min_tag = "  ← tarif minimum" if r.get("min_applied") else ""
 
-    print(f"│  💰 PRIX FINAL : {prix_arrondi} TND{min_note:<{w-26}}│")
-    print(f"  point bounes: {prix_arrondi} * 0.5 = {math.ceil(int(prix_arrondi * 0.5)/ 5)* 5} points de fidélité")
-
-    print("└" + "─"*w + "┘")
+    row("Prix exact",    f"{exact:.2f} TND{min_tag}")
+    row("Prix facturé",  f"{rounded} TND  (arrondi ↑ au 5 TND)")
+    row("Points fidél.", f"{pts} pts  (= {rounded} × 0.5 arrondi)")
+    print("└" + "─" * W + "┘")
 
 
 def _sep(title: str) -> None:
-    print("\n" + "═"*60)
+    print("\n" + "═" * 62)
     print(f"  {title}")
-    print("═"*60)
+    print("═" * 62)
 
 
 def _step(n: int, title: str) -> None:
